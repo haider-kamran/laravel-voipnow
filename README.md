@@ -4,77 +4,253 @@
 [![Total Downloads](https://poser.pugx.org/hyderkamran/laravel-voipnow/downloads)](https://packagist.org/packages/hyderkamran/laravel-voipnow)
 [![License](https://poser.pugx.org/hyderkamran/laravel-voipnow/license)](https://packagist.org/packages/hyderkamran/laravel-voipnow)
 
-A laravel 10 package to interact with voipnow System API
+A production-ready Laravel package for interacting with:
+- **VoipNow UnifiedAPI v5** (REST) — phone calls, events, presence, CDRs, faxes
+- **VoipNow SystemAPI** (SOAP) — account provisioning, organizations, extensions, billing, PBX
 
-**Note:** The token credential information will be stored to the users table, with token and expiry information for the authenticated user.
+Supports **Laravel 10, 11, 12** with **PHP 8.1+**.
+
+---
+
+## Features
+
+- **Dual adapter** — REST (UnifiedAPI v5, default) and SOAP (SystemAPI, legacy)
+- **Two facades** — `VoipNow` (REST) and `VoipNowSoap` (SystemAPI)
+- **OAuth2 token management** — automatic acquisition and refresh per user or via cache
+- **Typed HTTP methods** — `get()`, `post()`, `put()`, `patch()`, `delete()`
+- **Pagination helper** — `paginate($resource, $page, $perPage)`
+- **Resource finder** — `find($resource, $id)`
+- **13 first-class REST helpers** — `GetServiceProviders()`, `GetOrganizations()`, `GetUsers()`, etc.
+- **338+ SOAP operations** — full SystemAPI with IDE docblocks
+- **Magic method fallback** — `VoipNow::GetCallQueues()` auto-maps to REST endpoint
+- **Artisan command** — `php artisan voipnow:check` for connection diagnostics
+- **Full test suite** — Orchestra Testbench + Mockery
+
+---
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| PHP | ^8.1, ^8.2, ^8.3 |
+| Laravel | ^10.0, ^11.0, ^12.0 |
+| GuzzleHttp | ^7.5 |
+| php-soap ext | Required only for SOAP adapter |
+
+---
 
 ## Installation
-
-You can install the package via composer:
 
 ```bash
 composer require hyderkamran/laravel-voipnow
 ```
 
-From the command-line run:
+Publish the config file and migration:
 
 ```bash
 php artisan vendor:publish --provider="HyderKamran\VoipNow\VoipNowServiceProvider"
 ```
 
-Add the following keys to your .env file.
+Run the migration (adds token columns to your `users` table):
+
+```bash
+php artisan migrate
+```
+
+---
+
+## Configuration
+
+Add these keys to your `.env` file:
 
 ```env
-VOIPNOW_VERSION=
-VOIPNOW_DOMAIN=
-VOIPNOW_KEY=
-VOIPNOW_SECRET=
+# Required
+VOIPNOW_DOMAIN=https://voipnow.yourdomain.com
+VOIPNOW_KEY=your-oauth2-client-id
+VOIPNOW_SECRET=your-oauth2-client-secret
+
+# Optional
+VOIPNOW_ADAPTER=rest            # "rest" (default) or "soap"
+VOIPNOW_VERSION=                # SOAP only — VoipNow version string e.g. 4.8.0
+VOIPNOW_PARENT_IDENTIFIER=      # Scope calls to a specific parent account
+VOIPNOW_WSDL_URL=               # SOAP only — override default WSDL URL
 ```
 
-The following key is optional
+---
 
-```env
-VOIPNOW_PARENT_IDENTIFIER=
-```
+## Usage — UnifiedAPI v5 (REST)
 
-## Usage
+The `VoipNow` facade targets the **VoipNow UnifiedAPI v5** for real-time telephony operations.
 
-You can call a VoipNow SystemAPI method directly by using the facace (e.g. `VoipNow::{VOIPNOWFUNCTION}`). For a full reference of all the available functions refer to the [VoipNow SystemAPI documenatation](https://wiki.4psa.com/display/VNUAPI30/VoipNow+SystemAPI).
-
-### Examples
-
-Retrieve a  list of all the service providers
-
-``` php
-use VoipNow;
-
-return VoipNow::GetServiceProviders();
-```
-
-Retrieve the organization account details
+### Core HTTP Methods
 
 ```php
 use VoipNow;
 
-return VoipNow::GetOrganizationDetails(['identifier' => 'XXX']);
-OR
-return VoipNow::GetOrganizationDetails(['ID' => 'XXX']);
+// GET /api/v5/organizations
+VoipNow::get('organizations');
+VoipNow::get('organizations', ['limit' => 10, 'offset' => 0]);
+
+// POST /api/v5/organizations
+VoipNow::post('organizations', ['name' => 'Acme Corp', 'email' => 'admin@acme.com']);
+
+// PUT /api/v5/organizations/42
+VoipNow::put('organizations/42', ['name' => 'Acme Corp Updated']);
+
+// PATCH /api/v5/extensions/101
+VoipNow::patch('extensions/101', ['display_name' => 'Reception']);
+
+// DELETE /api/v5/organizations/42
+VoipNow::delete('organizations/42');
 ```
 
-If you do not use the Facade, you can call it with the app() helper.
+### Pagination & Single-resource Helpers
 
 ```php
-$voipNow = app('voipnow');
+// Paginate: page 2, 25 records per page
+VoipNow::paginate('users', page: 2, perPage: 25);
 
-return $voipNow->GetOrganizationDetails(['identifier' => 'XXX']);
-OR
-return $voipNow->GetOrganizationDetails(['ID' => 'XXX']);
+// Fetch single resource by ID
+VoipNow::find('organizations', 42);
+VoipNow::find('extensions', '101');
 ```
+
+### First-class Resource Helpers
+
+```php
+VoipNow::GetServiceProviders();
+VoipNow::GetOrganizations(['limit' => 50]);
+VoipNow::GetOrganizationDetails(['ID' => 42]);
+VoipNow::GetOrganizationDetails(['identifier' => 'acme']);
+VoipNow::GetUsers();
+VoipNow::GetExtensions(['organization_id' => 5]);
+VoipNow::GetUserGroups();
+VoipNow::GetChargingPlans();
+VoipNow::GetPhoneNumbers();
+VoipNow::GetCallQueues();
+VoipNow::GetIVRs();
+VoipNow::GetSounds();
+VoipNow::GetCallHistory(['from' => '2024-01-01', 'to' => '2024-01-31']);
+VoipNow::GetSystemInfo();
+```
+
+### Magic Method Fallback
+
+Any `Get*`, `Add*`, `Update*`, `Remove*` call is automatically resolved to its REST endpoint:
+
+```php
+VoipNow::GetFaxes();               // GET  /api/v5/faxes
+VoipNow::AddExtensions([...]);     // POST /api/v5/extensions
+VoipNow::UpdateUsers([...]);       // PUT  /api/v5/users
+VoipNow::RemoveExtensions([...]);  // DELETE /api/v5/extensions
+```
+
+---
+
+## Usage — SystemAPI (SOAP)
+
+The `VoipNowSoap` facade (or `VoipNow::soap()`) targets the **VoipNow SystemAPI** for account provisioning.
+
+> **Note:** Requires the `php-soap` extension. Set `VOIPNOW_ADAPTER=soap` is **not** required — the SOAP client is always available independently.
+
+### Via the Dedicated Facade
+
+```php
+use VoipNowSoap;
+
+// Service Providers
+VoipNowSoap::GetServiceProviders();
+VoipNowSoap::AddServiceProvider(['name' => 'My SP', 'email' => 'sp@example.com']);
+VoipNowSoap::GetServiceProviderDetails(['identifier' => 'my-sp']);
+
+// Organizations
+VoipNowSoap::GetOrganizations();
+VoipNowSoap::AddOrganization(['name' => 'Acme', 'serviceProviderIdentifier' => 'my-sp']);
+VoipNowSoap::GetOrganizationDetails(['identifier' => 'acme']);
+VoipNowSoap::RemoveOrganization(['identifier' => 'acme']);
+
+// Extensions
+VoipNowSoap::GetExtensions(['organizationIdentifier' => 'acme']);
+VoipNowSoap::AddExtension(['number' => '100', 'name' => 'Reception']);
+VoipNowSoap::GetExtensionDetails(['identifier' => '100']);
+VoipNowSoap::SetExtensionVoicemail(['identifier' => '100', 'active' => true]);
+
+// Users
+VoipNowSoap::GetUsers();
+VoipNowSoap::AddUser(['login' => 'john', 'password' => 'secret']);
+VoipNowSoap::GetUserDetails(['identifier' => 'john']);
+
+// Billing
+VoipNowSoap::GetChargingPlans();
+VoipNowSoap::AddChargingPlan(['name' => 'Basic Plan']);
+VoipNowSoap::GetCallingCards();
+
+// PBX
+VoipNowSoap::GetQueues(['organizationIdentifier' => 'acme']);
+VoipNowSoap::GetIVRs(['organizationIdentifier' => 'acme']);
+VoipNowSoap::GetConferences();
+
+// Reports
+VoipNowSoap::GetCallReport(['from' => '2024-01-01', 'to' => '2024-01-31']);
+VoipNowSoap::GetSIPReport();
+
+// Global
+VoipNowSoap::GetTimezones();
+VoipNowSoap::GetLanguages();
+```
+
+### Via the REST Facade's soap() Accessor
+
+```php
+use VoipNow;
+
+VoipNow::soap()->GetOrganizations();
+VoipNow::soap()->AddExtension(['number' => '200', 'name' => 'Sales']);
+VoipNow::soap()->call('GetExtensionDetails', ['identifier' => '200']);
+```
+
+### Via the Container
+
+```php
+$soapClient = app('voipnow.soap');
+$soapClient->GetServiceProviders();
+```
+
+---
+
+## Artisan Commands
+
+```bash
+# Test the VoipNow API connection and display config status
+php artisan voipnow:check
+```
+
+Example output:
+```
+VoipNow Connection Check
+──────────────────────────────────────────────────
+  Adapter:     rest
+  Domain:      https://voipnow.yourdomain.com
+  Key:         ✓ Set
+  Secret:      ✓ Set
+
+Testing connection...
+✓ Connection successful!
+
+Server Info:
+  version: 4.8.0
+  ...
+```
+
+---
+
 ## Testing
 
-``` bash
+```bash
 composer test
 ```
+
+---
 
 ## Changelog
 
@@ -86,7 +262,7 @@ Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
 
 ### Security
 
-If you discover any security related issues, please email development@go-trex.com instead of using the issue tracker.
+If you discover any security related issues, please email kamrankhosa40@gmail.com instead of using the issue tracker.
 
 ## Credits
 
@@ -94,7 +270,7 @@ If you discover any security related issues, please email development@go-trex.co
 
 ## Support
 
-[Please open an issue in github](https://github.com/haider-kamran/laravel-voipnow/issues)
+[Please open an issue in GitHub](https://github.com/haider-kamran/laravel-voipnow/issues)
 
 ## License
 

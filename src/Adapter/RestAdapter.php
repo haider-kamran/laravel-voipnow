@@ -1,101 +1,203 @@
 <?php
 
+declare(strict_types=1);
+
 namespace HyderKamran\VoipNow\Adapter;
 
-use Auth;
 use GuzzleHttp\Client as Guzzle;
-use HyderKamran\VoipNow\Interface\ConnectorInterface;
+use GuzzleHttp\Exception\GuzzleException;
+use HyderKamran\VoipNow\Contracts\ConnectorInterface;
+use HyderKamran\VoipNow\Exception\VoipNowException;
+use HyderKamran\VoipNow\Traits\HandlesVoipNowConfig;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
-class SoapAdapter implements ConnectorInterface
+/**
+ * RestAdapter — primary adapter for the VoipNow UnifiedAPI v5 (REST/JSON).
+ *
+ * Handles OAuth2 token acquisition, automatic token refresh, and all
+ * HTTP verb methods required by ConnectorInterface. Token storage is
+ * attempted on the authenticated user model; falls back to the Laravel
+ * cache (useful for queued jobs or CLI commands).
+ */
+class RestAdapter implements ConnectorInterface
 {
-    protected $client;
-    public function connect(array $config)
+    use HandlesVoipNowConfig;
+
+    protected array $config = [];
+    protected ?Guzzle $httpClient = null;
+
+    public function connect(array $config): static
     {
-        $this->config = $config;
-        return $this->getAdapter();
+        $this->config = $this->normalizeConfig($config);
+        $this->httpClient = $this->createHttpClient();
+
+        return $this;
     }
 
-    private function getAdapter()
+    protected function createHttpClient(): Guzzle
     {
-        $wsdlDomain = $this->config['voip_domain'] . '/soap2/schema/latest/voipnowservice.wsdl';
+        $domain = $this->getDomain($this->config);
 
-        $wsdlOptions = [
-            'uri' => 'http://schemas.xmlsoap.org/soap/envelope/',
-            'style' => SOAP_RPC,
-            'use' => SOAP_ENCODED,
-            'soap_version' => SOAP_1_1,
-            'cache_wsdl' => WSDL_CACHE_BOTH,
-            'connection_timeout' => 60,
-            'trace' => true,
-            'encoding' => 'UTF-8',
-            'exceptions' => true,
-        ];
+        if (empty($domain)) {
+            throw new VoipNowException('The VOIPNOW_DOMAIN configuration value is required.');
+        }
 
-        $client = new \SoapClient($wsdlDomain, $wsdlOptions);
-
-        $auth = new \stdClass();
-        $auth->accessToken = $this->getToken();
-        $authvalues = new \SoapVar($auth, SOAP_ENC_OBJECT, 'http://4psa.com/HeaderData.xsd/' . $this->config['voip_version']);
-
-        $header = new \SoapHeader('http://4psa.com/HeaderData.xsd/' . $this->config['voip_version'], 'userCredentials', $authvalues, false);
-        $client->__setSoapHeaders([$header]);
-
-        return $client;
+        return new Guzzle([
+            'base_uri'    => $domain . '/api/v5/',
+            'timeout'     => 60,
+            'headers'     => [
+                'Authorization' => 'Bearer ' . $this->getToken(),
+                'Accept'        => 'application/json',
+                'Content-Type'  => 'application/json',
+            ],
+            'http_errors' => false,
+        ]);
     }
 
-    private function getToken()
+    // -----------------------------------------------------------------------
+    // Token management
+    // -----------------------------------------------------------------------
+
+    protected function getToken(): string
     {
-        $tokenInfo = $this->getTokenInfo();
+        $info = $this->getTokenInfo();
 
-        if (!isset($tokenInfo->voipnow_access_token) || $tokenInfo->voipnow_token_expired_at <= now()) {
+        if (empty($info['voipnow_access_token']) || $this->tokenIsExpired($info)) {
+            $info = $this->fetchFreshToken();
+            $this->storeTokenInfo($info);
+        }
 
-            $client = new Guzzle;
-            $request = $client->post($this->config['domain'] . '/oauth/token.php', [
+        return (string) $info['voipnow_access_token'];
+    }
+
+    protected function tokenIsExpired(array $info): bool
+    {
+        return empty($info['voipnow_token_expired_at'])
+            || $info['voipnow_token_expired_at'] <= now()->toDateTimeString();
+    }
+
+    protected function fetchFreshToken(): array
+    {
+        $this->requireCredentials($this->config);
+
+        try {
+            $response = (new Guzzle())->post($this->getTokenEndpoint($this->config), [
                 'form_params' => [
-                    'grant_type' => 'client_credentials',
-                    'client_id' => $this->config['voip_key'],
+                    'grant_type'    => 'client_credentials',
+                    'client_id'     => $this->config['voip_key'],
                     'client_secret' => $this->config['voip_secret'],
                 ],
+                'http_errors' => false,
             ]);
-
-            $result = json_decode($request->getBody()->getContents());
-
-            $tokenInfo->voipnow_access_token = $result->access_token;
-            $tokenInfo->voipnow_token_expires_in = $result->expires_in;
-            $tokenInfo->voipnow_token_expired_at = now()->addSeconds($result->expires_in)->format('Y-m-d H:i:s');
-
-            $this->storeTokenInfo($tokenInfo);
-
-            return $tokenInfo->voipnow_access_token;
+        } catch (GuzzleException $e) {
+            throw new VoipNowException('Unable to request VoipNow token: ' . $e->getMessage(), $e->getCode(), $e);
         }
 
-        return $tokenInfo->voipnow_access_token;
-    }
+        $payload = json_decode((string) $response->getBody(), true);
 
-    private function storeTokenInfo($tokenInfo)
-    {
-        $userData = Auth::user();
-        $userData->voipnow_access_token = $tokenInfo->voipnow_access_token;
-        $userData->voipnow_token_expires_in = $tokenInfo->voipnow_token_expires_in;
-        $userData->voipnow_token_expired_at = $tokenInfo->voipnow_token_expired_at;
-        return $userData->save();
-    }
-
-    private function getTokenInfo()
-    {
-        if (Auth::guest()) {
-            throw new \Exception('Please login to make this request.');
+        if (json_last_error() !== JSON_ERROR_NONE || empty($payload['access_token'])) {
+            throw new VoipNowException('Could not retrieve a valid VoipNow access token.');
         }
 
-        $currentUser = Auth::user();
-        $tokenInfo = [
-            'voipnow_access_token' => $currentUser->voipnow_access_token,
-            'voipnow_token_expires_in' => $currentUser->voipnow_token_expires_in,
-            'voipnow_token_expired_at' => $currentUser->voipnow_token_expired_at,
+        $expiresIn = (int) ($payload['expires_in'] ?? 3600);
+
+        return [
+            'voipnow_access_token'     => $payload['access_token'],
+            'voipnow_token_expires_in' => $expiresIn,
+            'voipnow_token_expired_at' => now()->addSeconds($expiresIn)->toDateTimeString(),
         ];
-
-        return $tokenInfo;
-
     }
 
+    protected function storeTokenInfo(array $info): void
+    {
+        if (Auth::check()) {
+            $user = Auth::user();
+            $user->voipnow_access_token     = $info['voipnow_access_token'];
+            $user->voipnow_token_expires_in = $info['voipnow_token_expires_in'];
+            $user->voipnow_token_expired_at = $info['voipnow_token_expired_at'];
+            $user->save();
+            return;
+        }
+
+        Cache::put('voipnow_token_info', $info, $info['voipnow_token_expires_in']);
+    }
+
+    protected function getTokenInfo(): array
+    {
+        if (Auth::check()) {
+            $user = Auth::user();
+            return [
+                'voipnow_access_token'     => $user->voipnow_access_token ?? null,
+                'voipnow_token_expires_in' => $user->voipnow_token_expires_in ?? null,
+                'voipnow_token_expired_at' => $user->voipnow_token_expired_at ?? null,
+            ];
+        }
+
+        return Cache::get('voipnow_token_info', [
+            'voipnow_access_token'     => null,
+            'voipnow_token_expires_in' => null,
+            'voipnow_token_expired_at' => null,
+        ]);
+    }
+
+    // -----------------------------------------------------------------------
+    // HTTP verb methods — ConnectorInterface implementation
+    // -----------------------------------------------------------------------
+
+    public function get(string $endpoint, array $queryParams = []): array
+    {
+        return $this->send('GET', $endpoint, ['query' => $queryParams]);
+    }
+
+    public function post(string $endpoint, array $data = []): array
+    {
+        return $this->send('POST', $endpoint, ['json' => $data]);
+    }
+
+    public function put(string $endpoint, array $data = []): array
+    {
+        return $this->send('PUT', $endpoint, ['json' => $data]);
+    }
+
+    public function patch(string $endpoint, array $data = []): array
+    {
+        return $this->send('PATCH', $endpoint, ['json' => $data]);
+    }
+
+    public function delete(string $endpoint, array $data = []): array
+    {
+        return $this->send('DELETE', $endpoint, ['json' => $data]);
+    }
+
+    protected function send(string $method, string $endpoint, array $options = []): array
+    {
+        if ($this->httpClient === null) {
+            throw new VoipNowException('RestAdapter is not connected. Call connect() first.');
+        }
+
+        try {
+            $response = $this->httpClient->request($method, $endpoint, $options);
+        } catch (GuzzleException $e) {
+            throw new VoipNowException('VoipNow API request failed: ' . $e->getMessage(), $e->getCode(), $e);
+        }
+
+        $statusCode = $response->getStatusCode();
+        $body       = (string) $response->getBody();
+        $payload    = json_decode($body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new VoipNowException('Invalid JSON response from VoipNow API (status ' . $statusCode . ').');
+        }
+
+        if ($statusCode >= 400) {
+            $message = $payload['message'] ?? $payload['error'] ?? 'Unknown error';
+            throw new VoipNowException(
+                sprintf('VoipNow API error [%d]: %s', $statusCode, $message),
+                $statusCode
+            );
+        }
+
+        return $payload ?? [];
+    }
 }
