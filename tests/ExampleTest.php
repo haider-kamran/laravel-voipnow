@@ -1,6 +1,6 @@
 <?php
 
-namespace KamranKhosa\VoipNow\Tests;
+namespace HyderKamran\VoipNow\Tests;
 
 use PHPUnit\Framework\TestCase;
 

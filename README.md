@@ -1,8 +1,8 @@
 # Laravel VoipNow
 
-[![Latest Stable Version](https://poser.pugx.org/kamrankhosa/laravel-voipnow/v/stable)](https://packagist.org/packages/kamrankhosa/laravel-voipnow)
-[![Total Downloads](https://poser.pugx.org/kamrankhosa/laravel-voipnow/downloads)](https://packagist.org/packages/kamrankhosa/laravel-voipnow)
-[![License](https://poser.pugx.org/kamrankhosa/laravel-voipnow/license)](https://packagist.org/packages/kamrankhosa/laravel-voipnow)
+[![Latest Stable Version](https://poser.pugx.org/hyderkamran/laravel-voipnow/v/stable)](https://packagist.org/packages/hyderkamran/laravel-voipnow)
+[![Total Downloads](https://poser.pugx.org/hyderkamran/laravel-voipnow/downloads)](https://packagist.org/packages/hyderkamran/laravel-voipnow)
+[![License](https://poser.pugx.org/hyderkamran/laravel-voipnow/license)](https://packagist.org/packages/hyderkamran/laravel-voipnow)
 
 A laravel 10 package to interact with voipnow System API
 
@@ -13,13 +13,13 @@ A laravel 10 package to interact with voipnow System API
 You can install the package via composer:
 
 ```bash
-composer require kamrankhosa/laravel-voipnow
+composer require hyderkamran/laravel-voipnow
 ```
 
 From the command-line run:
 
 ```bash
-php artisan vendor:publish --provider="KamranKhosa\VoipNow\VoipNowServiceProvider"
+php artisan vendor:publish --provider="HyderKamran\VoipNow\VoipNowServiceProvider"
 ```
 
 Add the following keys to your .env file.
@@ -90,11 +90,11 @@ If you discover any security related issues, please email development@go-trex.co
 
 ## Credits
 
-- [Kamran Haider](https://github.com/kamrankhosa)
+- [Kamran Haider](https://github.com/haider-kamran)
 
 ## Support
 
-[Please open an issue in github](https://github.com/kamrankhosa/laravel-voipnow/issues)
+[Please open an issue in github](https://github.com/haider-kamran/laravel-voipnow/issues)
 
 ## License
 

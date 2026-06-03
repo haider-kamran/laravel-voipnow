@@ -1,9 +1,9 @@
 <?php
 
-namespace KamranKhosa\VoipNow;
+namespace HyderKamran\VoipNow;
 
 use Illuminate\Config\Repository;
-use KamranKhosa\VoipNow\Interface\ConnectorInterface;
+use HyderKamran\VoipNow\Interface\ConnectorInterface;
 
 class VoipNowClass
 {

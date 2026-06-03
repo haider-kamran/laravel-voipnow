@@ -1,10 +1,10 @@
 <?php
 
-namespace KamranKhosa\VoipNow;
+namespace HyderKamran\VoipNow;
 
 use Illuminate\Container\Container;
 use Illuminate\Support\ServiceProvider;
-use KamranKhosa\VoipNow\Adapter\SoapAdapter;
+use HyderKamran\VoipNow\Adapter\SoapAdapter;
 
 class VoipNowServiceProvider extends ServiceProvider
 {

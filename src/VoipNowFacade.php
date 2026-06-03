@@ -1,6 +1,6 @@
 <?php
 
-namespace KamranKhosa\VoipNow;
+namespace HyderKamran\VoipNow;
 
 use Illuminate\Support\Facades\Facade;
 class VoipNowFacade extends Facade
